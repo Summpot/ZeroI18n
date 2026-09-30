@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <PackageId>ZeroI18n</PackageId>
+    <Version>1.0.0</Version>
+    <Title>ZeroI18n</Title>
+    <Authors>Summpot</Authors>
+    <Description>High-performance, zero-overhead compile-time i18n source generator for .NET. Supports Project Fluent (.ftl), ICU MessageFormat, and i18next JSON with NativeAOT support.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Summpot/ZeroI18n</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Summpot/ZeroI18n</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>i18n;l10n;localization;source-generator;fluent;ftl;icu;messageformat;i18next;aot;nativeaot</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <NoWarn>$(NoWarn);RS1036;RS2008</NoWarn>
+    <DefaultItemExcludes>$(DefaultItemExcludes);tests/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="build\ZeroI18n.props" Pack="true" PackagePath="build\ZeroI18n.props" />
+    <None Include="build\ZeroI18n.props" Pack="true" PackagePath="buildTransitive\ZeroI18n.props" />
+    <None Include="README.md" Pack="true" PackagePath="\" Condition="Exists('README.md')" />
+  </ItemGroup>
+
+  <Target Name="AddSourceGeneratorToPackage" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <None Include="$(OutputPath)$(AssemblyName).dll"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs"
+            Visible="false" />
+    </ItemGroup>
+  </Target>
+
+</Project>

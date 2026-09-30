@@ -1,0 +1,149 @@
+name: Build & Release ZeroI18n
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to pack and release (e.g. 1.0.0)"
+        required: false
+        default: "1.0.0"
+        type: string
+      publish_release:
+        description: "Create GitHub Release and attach assets"
+        required: false
+        default: true
+        type: boolean
+      publish_nuget:
+        description: "Publish NuGet package to NuGet.org via Trusted Publishing"
+        required: false
+        default: true
+        type: boolean
+      nuget_user:
+        description: "NuGet.org username for Trusted Publishing"
+        required: false
+        default: "Summpot"
+        type: string
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+jobs:
+  build-test-release:
+    name: Build, Test & Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore ZeroI18n.sln
+
+      - name: Build solution
+        run: dotnet build ZeroI18n.sln -c Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test ZeroI18n.sln -c Release --no-build --verbosity normal
+
+      - name: Determine Package Version
+        id: ver
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="1.0.0"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Pack NuGet Package
+        run: |
+          mkdir -p release-assets
+          dotnet pack ZeroI18n.csproj \
+            -c Release \
+            --no-build \
+            -p:Version="${{ steps.ver.outputs.version }}" \
+            -o release-assets/
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: release-assets/*.nupkg
+
+      - name: Create GitHub Release
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_release) || startsWith(github.ref, 'refs/tags/v') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v${{ steps.ver.outputs.version }}"
+          RELEASE_TITLE="ZeroI18n v${{ steps.ver.outputs.version }}"
+          
+          NOTES=$(cat <<EOF
+          ### ZeroI18n v${{ steps.ver.outputs.version }}
+          High-performance, zero-overhead compile-time i18n source generator for .NET.
+
+          #### Highlights:
+          - Compile-time Project Fluent (\`.ftl\`), ICU MessageFormat, and i18next support
+          - Zero runtime allocations, zero reflection
+          - 100% NativeAOT & trimming compatible
+          - Built-in \`LocalizationManager : INotifyPropertyChanged\` for live UI switching without restarts
+
+          #### Install via NuGet:
+          \`\`\`bash
+          dotnet add package ZeroI18n --version ${{ steps.ver.outputs.version }}
+          \`\`\`
+          EOF
+          )
+
+          echo "=== Release Assets to upload ==="
+          ls -lh release-assets/
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists, uploading assets..."
+            gh release upload "$TAG_NAME" release-assets/* --clobber
+          else
+            echo "Creating release $TAG_NAME..."
+            gh release create "$TAG_NAME" release-assets/* \
+              --target "${{ github.sha }}" \
+              --title "$RELEASE_TITLE" \
+              --notes "$NOTES"
+          fi
+
+      - name: NuGet login (Trusted Publishing OIDC)
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_nuget) || startsWith(github.ref, 'refs/tags/v') }}
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER || inputs.nuget_user || 'Summpot' }}
+
+      - name: Publish NuGet to NuGet.org
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish_nuget) || startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "=== Publishing NuGet packages to NuGet.org via Trusted Publishing ==="
+          dotnet nuget push "release-assets/*.nupkg" \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate

@@ -1,0 +1,18 @@
+# Build results
+bin/
+obj/
+artifacts/
+*.nupkg
+*.snupkg
+
+# IDE & Tooling
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS generated
+.DS_Store
+Thumbs.db

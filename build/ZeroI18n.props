@@ -1,0 +1,31 @@
+<Project>
+
+  <ItemGroup Condition="'$(EnableZeroI18n)' != 'false'">
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\messages\**\*.ftl"
+                     ZeroI18nFormat="fluent"
+                     Visible="false"
+                     Condition="Exists('$(MSBuildProjectDirectory)\messages')" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\messages\**\*.json"
+                     ZeroI18nFormat="messageFormat"
+                     Visible="false"
+                     Condition="Exists('$(MSBuildProjectDirectory)\messages')" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\locales\**\*.ftl"
+                     ZeroI18nFormat="fluent"
+                     Visible="false"
+                     Condition="Exists('$(MSBuildProjectDirectory)\locales')" />
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\locales\**\*.json"
+                     ZeroI18nFormat="i18next"
+                     Visible="false"
+                     Condition="Exists('$(MSBuildProjectDirectory)\locales')" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <CompilerVisibleProperty Include="RootNamespace" />
+    <CompilerVisibleProperty Include="ZeroI18nNamespace" />
+    <CompilerVisibleProperty Include="ZeroI18nClassName" />
+    <CompilerVisibleProperty Include="ZeroI18nAccessModifier" />
+    <CompilerVisibleProperty Include="ZeroI18nDefaultLocale" />
+    <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="ZeroI18nFormat" />
+  </ItemGroup>
+
+</Project>
