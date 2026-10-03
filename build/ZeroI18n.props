@@ -25,6 +25,8 @@
     <CompilerVisibleProperty Include="ZeroI18nClassName" />
     <CompilerVisibleProperty Include="ZeroI18nAccessModifier" />
     <CompilerVisibleProperty Include="ZeroI18nDefaultLocale" />
+    <CompilerVisibleProperty Include="ZeroI18nReportUnusedKeys" />
+    <CompilerVisibleProperty Include="ZeroI18nUnusedKeyAllowList" />
     <CompilerVisibleItemMetadata Include="AdditionalFiles" MetadataName="ZeroI18nFormat" />
   </ItemGroup>
 

@@ -110,6 +110,7 @@ jobs:
           - Zero runtime allocations, zero reflection
           - 100% NativeAOT & trimming compatible
           - Built-in \`LocalizationManager : INotifyPropertyChanged\` for live UI switching without restarts
+          - Compile-time warning \`ZERO005\` for unused message keys
 
           #### Install via NuGet:
           \`\`\`bash

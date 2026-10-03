@@ -152,6 +152,12 @@ You can customize the generated class name, namespace, accessibility, and fallba
   <!-- Default fallback locale (Default: en) -->
   <ZeroI18nDefaultLocale>zh-CN</ZeroI18nDefaultLocale>
 
+  <!-- Warn when a generated message is never referenced (Default: true) -->
+  <ZeroI18nReportUnusedKeys>true</ZeroI18nReportUnusedKeys>
+
+  <!-- Keys that should stay, separated by semicolons or commas -->
+  <ZeroI18nUnusedKeyAllowList>legacy-key;other.key</ZeroI18nUnusedKeyAllowList>
+
   <!-- Toggle generator on/off (Default: true) -->
   <EnableZeroI18n>true</EnableZeroI18n>
 </PropertyGroup>
@@ -169,6 +175,18 @@ ZeroI18n performs strict syntactic validation at compile time, catching errors e
 | **`ZERO002`** | Warning | Unsupported i18n value type |
 | **`ZERO003`** | Warning | Duplicate i18n message key |
 | **`ZERO004`** | Error | Project Fluent syntax error with precise line number |
+| **`ZERO005`** | Warning | Generated message key is never used |
+
+`ZERO005` points at the message in the default-locale file. A key counts as used when other code calls its method or `ForLocale` method, names it with `nameof`, passes its key, dotted form (`app-name` → `app.name`), or method name to `GetString` or the `LocalizationManager` indexer, or when that key appears as its own token in a string literal or in an `.axaml`, `.xaml`, `.razor`, or `.cshtml` additional file. Terms such as `-brand` are inlined at compile time and are not checked. A runtime-computed argument does not mark every key as used.
+
+Keep one Fluent message with a comment on the line above it (blank lines in between are fine). The same comment directly above an attribute keeps that attribute:
+
+```fluent
+# zeroi18n-allow-unused
+obsolete = Kept on purpose
+```
+
+`ZeroI18nUnusedKeyAllowList` keeps keys from any file format. `.editorconfig` can set `dotnet_diagnostic.ZERO005.severity` to `none`.
 
 ---
 

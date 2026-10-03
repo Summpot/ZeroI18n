@@ -267,7 +267,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 }
 
                 string key = string.IsNullOrEmpty(keyPrefix) ? property.Name : keyPrefix + "." + property.Name;
-                CollectValue(property.Value, key, fileInfo, path, messages, diagnostics);
+                CollectValue(property.Value, key, fileInfo, path, messages, diagnostics, property.Line);
             }
         }
 
@@ -277,11 +277,12 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             LocaleFileInfo fileInfo,
             string path,
             List<RawMessage> messages,
-            List<Diagnostic> diagnostics)
+            List<Diagnostic> diagnostics,
+            int line)
         {
             if (value is JsonString text)
             {
-                messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, Template.Parse(text.Value, fileInfo.Format), path));
+                messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, Template.Parse(text.Value, fileInfo.Format), path, line));
                 return;
             }
 
@@ -293,7 +294,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
             if (value is JsonArray array && fileInfo.Format == MessageFormat.MessageFormat)
             {
-                if (TryCollectMessageFormatVariants(array, key, fileInfo, path, messages))
+                if (TryCollectMessageFormatVariants(array, key, fileInfo, path, messages, line))
                 {
                     return;
                 }
@@ -307,7 +308,8 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             string key,
             LocaleFileInfo fileInfo,
             string path,
-            List<RawMessage> messages)
+            List<RawMessage> messages,
+            int line)
         {
             if (array.Items.Count != 1 || array.Items[0] is not JsonObject messageObject)
             {
@@ -337,7 +339,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 }
 
                 Template template = Template.Parse(text.Value, fileInfo.Format);
-                messages.Add(RawMessage.Plural(key, fileInfo.Locale, fileInfo.Format, category!, false, template, path, selectorVariable));
+                messages.Add(RawMessage.Plural(key, fileInfo.Locale, fileInfo.Format, category!, false, template, path, selectorVariable, line));
                 foundVariant = true;
             }
 
@@ -514,7 +516,8 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             string path,
             string? pluralCategory,
             bool isOrdinal,
-            string? selectorVariable)
+            string? selectorVariable,
+            int line)
         {
             Key = key;
             Locale = locale;
@@ -524,6 +527,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             PluralCategory = pluralCategory;
             IsOrdinal = isOrdinal;
             SelectorVariable = selectorVariable;
+            Line = line;
         }
 
         public string Key { get; }
@@ -542,14 +546,34 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         public string? SelectorVariable { get; }
 
-        public static RawMessage Simple(string key, string locale, MessageFormat format, Template template, string path)
+        public int Line { get; }
+
+        public static RawMessage Simple(string key, string locale, MessageFormat format, Template template, string path, int line = 0)
         {
-            return new RawMessage(key, locale, format, template, path, null, false, null);
+            return new RawMessage(key, locale, format, template, path, null, false, null, line);
         }
 
-        public static RawMessage Plural(string key, string locale, MessageFormat format, string category, bool isOrdinal, Template template, string path, string? selectorVariable = null)
+        public static RawMessage Plural(string key, string locale, MessageFormat format, string category, bool isOrdinal, Template template, string path, string? selectorVariable = null, int line = 0)
         {
-            return new RawMessage(key, locale, format, template, path, category, isOrdinal, selectorVariable);
+            return new RawMessage(key, locale, format, template, path, category, isOrdinal, selectorVariable, line);
+        }
+
+        public static void SelectDefinition(IReadOnlyList<RawMessage> messages, string defaultLocale, out string path, out int line)
+        {
+            RawMessage? selected = null;
+            foreach (RawMessage message in messages)
+            {
+                if (string.Equals(message.Locale, defaultLocale, StringComparison.Ordinal))
+                {
+                    selected = message;
+                    break;
+                }
+
+                selected ??= message;
+            }
+
+            path = selected?.Path ?? string.Empty;
+            line = selected?.Line ?? 0;
         }
     }
 
@@ -656,7 +680,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
                 if (TrySplitI18NextPluralKey(message.Key, out string? baseKey, out string? category, out bool isOrdinal))
                 {
-                    i18nextVariants.Add(RawMessage.Plural(baseKey!, message.Locale, message.Format, category!, isOrdinal, message.Template, message.Path));
+                    i18nextVariants.Add(RawMessage.Plural(baseKey!, message.Locale, message.Format, category!, isOrdinal, message.Template, message.Path, null, message.Line));
                 }
             }
 
@@ -688,7 +712,9 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, Template>> pluralTemplates,
             IReadOnlyList<Parameter> parameters,
             string defaultLocale,
-            string? selectorVariable)
+            string? selectorVariable,
+            string definitionPath,
+            int definitionLine)
         {
             Key = key;
             Templates = templates;
@@ -696,10 +722,18 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             Parameters = parameters;
             DefaultLocale = defaultLocale;
             SelectorVariable = selectorVariable;
+            DefinitionPath = definitionPath;
+            DefinitionLine = definitionLine;
             MethodName = string.Empty;
         }
 
         public string Key { get; }
+
+        public string UsageKey => Key;
+
+        public string DefinitionPath { get; }
+
+        public int DefinitionLine { get; }
 
         public string MethodName { get; set; }
 
@@ -763,13 +797,16 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 selectorVariable = "count";
             }
 
+            RawMessage.SelectDefinition(messages, defaultLocale, out string definitionPath, out int definitionLine);
             return new MessageMethod(
                 key,
                 templates,
                 pluralTemplates.ToDictionary(static item => item.Key, static item => (IReadOnlyDictionary<string, Template>)item.Value, StringComparer.Ordinal),
                 Parameter.CreateMany(variables),
                 defaultLocale,
-                selectorVariable);
+                selectorVariable,
+                definitionPath,
+                definitionLine);
         }
 
         private static void AddVariables(List<string> variables, IEnumerable<string> newVariables)
@@ -798,7 +835,9 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             IReadOnlyDictionary<string, IReadOnlyDictionary<string, Template>> templates,
             IReadOnlyList<Parameter> parameters,
             string defaultLocale,
-            bool isOrdinal)
+            bool isOrdinal,
+            string definitionPath,
+            int definitionLine)
         {
             Key = key;
             MethodName = methodName;
@@ -806,9 +845,17 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             Parameters = parameters;
             DefaultLocale = defaultLocale;
             IsOrdinal = isOrdinal;
+            DefinitionPath = definitionPath;
+            DefinitionLine = definitionLine;
         }
 
         public string Key { get; }
+
+        public string UsageKey => IsOrdinal ? Key + ".ordinal" : Key;
+
+        public string DefinitionPath { get; }
+
+        public int DefinitionLine { get; }
 
         public string MethodName { get; }
 
@@ -853,13 +900,16 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 }
             }
 
+            RawMessage.SelectDefinition(messages, defaultLocale, out string definitionPath, out int definitionLine);
             return new PluralMethod(
                 key,
                 methodName,
                 templates.ToDictionary(static item => item.Key, static item => (IReadOnlyDictionary<string, Template>)item.Value, StringComparer.Ordinal),
                 Parameter.CreateMany(variables),
                 defaultLocale,
-                isOrdinal);
+                isOrdinal,
+                definitionPath,
+                definitionLine);
         }
     }
 
@@ -1259,7 +1309,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             builder.AppendLine("#pragma warning disable CS1591, CS8618, CS8604");
             builder.AppendLine("namespace " + model.Options.Namespace);
             builder.AppendLine("{");
-            builder.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.0.0\")]");
+            builder.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.1.0\")]");
             builder.AppendLine("    " + model.Options.AccessModifier + " static partial class " + model.Options.ClassName);
             builder.AppendLine("    {");
             builder.AppendLine("        public const string DefaultLocale = " + Literal(model.DefaultLocale) + ";");
@@ -1313,6 +1363,8 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             builder.AppendLine("    }");
             builder.AppendLine();
             EmitLocalizationManager(builder, model);
+            builder.AppendLine();
+            EmitKeyAttribute(builder);
             builder.AppendLine("}");
             return builder.ToString();
         }
@@ -1414,9 +1466,9 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         private static void EmitMessageMethod(StringBuilder builder, MessageMethod method)
         {
-            EmitGeneratedMethodAttribute(builder, method.Key);
+            EmitGeneratedMethodAttribute(builder, method.UsageKey, method.DefinitionPath, method.DefinitionLine);
             builder.AppendLine("        public static string " + method.MethodName + "(" + BuildParameters(method.Parameters) + ") => " + method.MethodName + "ForLocale(CurrentLocale" + BuildArgumentSuffix(method.Parameters) + ");");
-            EmitGeneratedMethodAttribute(builder, method.Key);
+            EmitGeneratedMethodAttribute(builder, method.UsageKey, method.DefinitionPath, method.DefinitionLine);
             builder.AppendLine("        public static string " + method.MethodName + "ForLocale(string? locale" + BuildParameterSuffix(method.Parameters) + ")");
             builder.AppendLine("        {");
             builder.AppendLine("            string __locale = NormalizeLocale(locale);");
@@ -1462,9 +1514,9 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         private static void EmitPluralMethod(StringBuilder builder, PluralMethod method)
         {
-            EmitGeneratedMethodAttribute(builder, method.Key);
+            EmitGeneratedMethodAttribute(builder, method.UsageKey, method.DefinitionPath, method.DefinitionLine);
             builder.AppendLine("        public static string " + method.MethodName + "(" + BuildParameters(method.Parameters) + ") => " + method.MethodName + "ForLocale(CurrentLocale" + BuildArgumentSuffix(method.Parameters) + ");");
-            EmitGeneratedMethodAttribute(builder, method.Key);
+            EmitGeneratedMethodAttribute(builder, method.UsageKey, method.DefinitionPath, method.DefinitionLine);
             builder.AppendLine("        public static string " + method.MethodName + "ForLocale(string? locale" + BuildParameterSuffix(method.Parameters) + ")");
             builder.AppendLine("        {");
             Parameter count = FindCountParameter(method.Parameters);
@@ -1492,7 +1544,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         private static void EmitGetStringMethod(StringBuilder builder, GenerationModel model)
         {
-            builder.AppendLine("        [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.0.0\")]");
+            builder.AppendLine("        [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.1.0\")]");
             builder.AppendLine("        [global::System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]");
             builder.AppendLine("        public static string GetString(string key) => key switch");
             builder.AppendLine("        {");
@@ -1524,7 +1576,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         private static void EmitLocalizationManager(StringBuilder builder, GenerationModel model)
         {
-            builder.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.0.0\")]");
+            builder.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.1.0\")]");
             builder.AppendLine("    [global::System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]");
             builder.AppendLine("    " + model.Options.AccessModifier + " sealed class LocalizationManager : global::System.ComponentModel.INotifyPropertyChanged");
             builder.AppendLine("    {");
@@ -1669,10 +1721,30 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             return "string.Concat(" + string.Join(", ", expressions) + ")";
         }
 
-        private static void EmitGeneratedMethodAttribute(StringBuilder builder, string key)
+        private static void EmitKeyAttribute(StringBuilder builder)
         {
-            builder.AppendLine("        [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.0.0\")]");
+            builder.AppendLine("    [global::System.AttributeUsage(global::System.AttributeTargets.Method, AllowMultiple = false, Inherited = false)]");
+            builder.AppendLine("    [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.1.0\")]");
+            builder.AppendLine("    internal sealed class ZeroI18nKeyAttribute : global::System.Attribute");
+            builder.AppendLine("    {");
+            builder.AppendLine("        public ZeroI18nKeyAttribute(string key, string path, int line)");
+            builder.AppendLine("        {");
+            builder.AppendLine("            Key = key;");
+            builder.AppendLine("            Path = path;");
+            builder.AppendLine("            Line = line;");
+            builder.AppendLine("        }");
+            builder.AppendLine();
+            builder.AppendLine("        public string Key { get; }");
+            builder.AppendLine("        public string Path { get; }");
+            builder.AppendLine("        public int Line { get; }");
+            builder.AppendLine("    }");
+        }
+
+        private static void EmitGeneratedMethodAttribute(StringBuilder builder, string key, string path, int line)
+        {
+            builder.AppendLine("        [global::System.CodeDom.Compiler.GeneratedCode(\"ZeroI18n\", \"1.1.0\")]");
             builder.AppendLine("        [global::System.Diagnostics.CodeAnalysis.ExcludeFromCodeCoverage]");
+            builder.AppendLine("        [ZeroI18nKey(" + Literal(key) + ", " + Literal(path) + ", " + line.ToString(CultureInfo.InvariantCulture) + ")]");
         }
 
         private static string Literal(string value)
@@ -1920,15 +1992,18 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
     private readonly struct JsonProperty
     {
-        public JsonProperty(string name, JsonValue value)
+        public JsonProperty(string name, JsonValue value, int line)
         {
             Name = name;
             Value = value;
+            Line = line;
         }
 
         public string Name { get; }
 
         public JsonValue Value { get; }
+
+        public int Line { get; }
     }
 
     private sealed class JsonParseException : Exception
@@ -2034,11 +2109,12 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                     Fail("expected a property name");
                 }
 
+                int line = LineAt(_index);
                 string name = ParseString();
                 SkipWhitespace();
                 Expect(':');
                 JsonValue value = ParseValue();
-                properties.Add(new JsonProperty(name, value));
+                properties.Add(new JsonProperty(name, value, line));
                 SkipWhitespace();
                 if (TryConsume('}'))
                 {
@@ -2221,6 +2297,21 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             _index += literal.Length;
         }
 
+        private int LineAt(int index)
+        {
+            int line = 1;
+            int end = Math.Min(index, _text.Length);
+            for (int position = 0; position < end; position++)
+            {
+                if (_text[position] == '\n')
+                {
+                    line++;
+                }
+            }
+
+            return line;
+        }
+
         private void SkipWhitespace()
         {
             while (!IsEnd && char.IsWhiteSpace(_text[_index]))
@@ -2355,7 +2446,7 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
                         string attrId = trimmed.Substring(1, attrEqualsIdx - 1).Trim();
                         string attrVal = trimmed.Substring(attrEqualsIdx + 1).Trim();
-                        currentEntry.AddAttribute(attrId, attrVal);
+                        currentEntry.AddAttribute(attrId, attrVal, lineIndex + 1);
                     }
                     else
                     {
@@ -2388,12 +2479,12 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 }
 
                 string key = string.IsNullOrEmpty(keyPrefix) ? entry.Id : keyPrefix + "-" + entry.Id;
-                EmitFluentEntry(entry.ValueLines, key, fileInfo, path, messages, diagnostics, terms);
+                EmitFluentEntry(entry.ValueLines, key, fileInfo, path, messages, diagnostics, terms, entry.LineNumber);
 
                 foreach (FluentAttribute attr in entry.Attributes)
                 {
                     string attrKey = key + "-" + attr.Id;
-                    EmitFluentEntry(attr.ValueLines, attrKey, fileInfo, path, messages, diagnostics, terms);
+                    EmitFluentEntry(attr.ValueLines, attrKey, fileInfo, path, messages, diagnostics, terms, attr.LineNumber);
                 }
             }
         }
@@ -2405,11 +2496,12 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             string path,
             List<RawMessage> messages,
             List<Diagnostic> diagnostics,
-            Dictionary<string, string> terms)
+            Dictionary<string, string> terms,
+            int line)
         {
             if (lines.Count == 0)
             {
-                messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, Template.Parse(string.Empty, fileInfo.Format, terms), path));
+                messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, Template.Parse(string.Empty, fileInfo.Format, terms), path, line));
                 return;
             }
 
@@ -2419,13 +2511,13 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
                 foreach (var variant in variants!)
                 {
                     Template t = Template.Parse(variant.Pattern, fileInfo.Format, terms);
-                    messages.Add(RawMessage.Plural(key, fileInfo.Locale, fileInfo.Format, variant.Category, false, t, path, selectorVar));
+                    messages.Add(RawMessage.Plural(key, fileInfo.Locale, fileInfo.Format, variant.Category, false, t, path, selectorVar, line));
                 }
                 return;
             }
 
             Template template = Template.Parse(combined, fileInfo.Format, terms);
-            messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, template, path));
+            messages.Add(RawMessage.Simple(key, fileInfo.Locale, fileInfo.Format, template, path, line));
         }
 
         private static bool TryExtractSelectExpression(
@@ -2551,9 +2643,9 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
             public List<FluentAttribute> Attributes { get; }
             public FluentAttribute? CurrentAttribute => Attributes.Count > 0 ? Attributes[Attributes.Count - 1] : null;
 
-            public void AddAttribute(string id, string initialVal)
+            public void AddAttribute(string id, string initialVal, int lineNumber)
             {
-                FluentAttribute attr = new(id);
+                FluentAttribute attr = new(id, lineNumber);
                 if (!string.IsNullOrEmpty(initialVal))
                 {
                     attr.ValueLines.Add(initialVal);
@@ -2564,13 +2656,15 @@ public sealed class ZeroI18nGenerator : IIncrementalGenerator
 
         private sealed class FluentAttribute
         {
-            public FluentAttribute(string id)
+            public FluentAttribute(string id, int lineNumber)
             {
                 Id = id;
+                LineNumber = lineNumber;
                 ValueLines = new List<string>();
             }
 
             public string Id { get; }
+            public int LineNumber { get; }
             public List<string> ValueLines { get; }
         }
     }
